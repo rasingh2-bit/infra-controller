@@ -29,6 +29,22 @@
 #
 ARG RUST_VERSION=1.97.1
 
+FROM --platform=linux/amd64 debian:bookworm-slim AS freeipmi-builder
+
+ARG FREEIPMI_VERSION=1.6.20
+RUN apt-get update && \
+	DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+		build-essential ca-certificates curl libgcrypt20-dev && \
+	curl -fsSL "https://ftpmirror.gnu.org/freeipmi/freeipmi-${FREEIPMI_VERSION}.tar.gz" \
+		-o /tmp/freeipmi.tar.gz && \
+	echo "9cc644530ee629ffb94d6fd209e7cb4a8b8ae6677f89d2dc461efed9b2e709f2  /tmp/freeipmi.tar.gz" | sha256sum -c - && \
+	cd /tmp && tar xzf freeipmi.tar.gz && \
+	cd "freeipmi-${FREEIPMI_VERSION}" && \
+	./configure --prefix=/usr --sysconfdir=/etc --quiet && \
+	make -j"$(nproc)" --quiet && \
+	make install DESTDIR=/tmp/freeipmi-install --quiet && \
+	rm -rf /tmp/freeipmi.tar.gz /tmp/freeipmi-${FREEIPMI_VERSION}
+
 FROM --platform=$BUILDPLATFORM rust:${RUST_VERSION}-slim-bookworm AS builder
 
 ARG VERSION
@@ -91,6 +107,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libudev1 \
     openipmi \
     && rm -rf /var/lib/apt/lists/*
+
+# Overwrite vulnerable Debian-packaged freeipmi with source-built 1.6.20.
+COPY --from=freeipmi-builder /tmp/freeipmi-install/usr/lib/libfreeipmi.so.17.2.18 /usr/lib/x86_64-linux-gnu/libfreeipmi.so.17.2.18
+RUN cd /usr/lib/x86_64-linux-gnu && \
+	rm -f libfreeipmi.so.17.2.9 libfreeipmi.so.17.1.26 libfreeipmi.so.17 && \
+	ln -sf libfreeipmi.so.17.2.18 libfreeipmi.so.17 && \
+	ldconfig
 
 RUN mkdir -p /opt/machine-a-tron/bin /tmp/machine-a-tron-data
 
