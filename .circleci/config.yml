@@ -1,0 +1,138 @@
+# CircleCI configuration for NICo Core + REST image builds.
+# Mirrors the CodeBuild buildspec: build all images via `make images` and push
+# to Artifactory, then re-tag nico -> nvmetal-carbide.
+#
+# Required CircleCI project environment variables:
+#   ARTIFACTORY_REGISTRY  - e.g. artifactory.coupang.net/docker-local/cic-appnet/nico
+#   ARTIFACTORY_USERNAME  - Artifactory service account
+#   ARTIFACTORY_PASSWORD  - Artifactory API key / password
+#
+# Optional:
+#   NICO_ARCHES           - architectures to build (default: "amd64")
+#
+# IMAGE_TAG is auto-generated as v<short-sha>-<YYYYMMDDHHmmss> at build time.
+
+version: 2.1
+
+my_context: &my_context
+  context:
+    - coupang
+
+parameters:
+  nico-arches:
+    description: Architectures to build
+    type: string
+    default: "amd64"
+
+jobs:
+  build-and-push-images:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: 2xlarge
+    environment:
+      DOCKER_BUILDKIT: "1"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - checkout
+
+      - run:
+          name: Resolve build parameters
+          command: |
+            # Generate a timestamp-based tag: v<short-sha>-<YYYYMMDDHHmmss>
+            SHORT_SHA=$(git rev-parse --short=7 HEAD)
+            TIMESTAMP=$(date -u +%Y%m%d%H%M%S)
+            TAG="v${SHORT_SHA}-${TIMESTAMP}"
+
+            ARCHES="<< pipeline.parameters.nico-arches >>"
+            if [ "$ARCHES" = "amd64" ] && [ -n "${NICO_ARCHES:-}" ]; then
+              ARCHES="$NICO_ARCHES"
+            fi
+
+            echo "export IMAGE_TAG=$TAG" >> "$BASH_ENV"
+            echo "export NICO_ARCHES=$ARCHES" >> "$BASH_ENV"
+            echo "Build parameters: IMAGE_TAG=$TAG NICO_ARCHES=$ARCHES"
+
+      - run:
+          name: Install build prerequisites
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+
+            # Rust toolchain (version from rust-toolchain.toml)
+            RUST_VERSION=$(grep '^channel' rust-toolchain.toml | sed 's/.*= *"\(.*\)"/\1/')
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+              sh -s -- -y --default-toolchain "$RUST_VERSION"
+            echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
+            source "$HOME/.cargo/env"
+
+            # cargo-make (required by make images-core / boot artifacts)
+            cargo install cargo-make --locked
+
+            # Docker buildx (ensure multi-platform builder is available)
+            docker buildx create --name nico-builder --use --bootstrap 2>/dev/null || \
+              docker buildx use nico-builder 2>/dev/null || true
+            docker buildx inspect --bootstrap
+
+      - run:
+          name: Login to Artifactory
+          command: |
+            echo "$ARTIFACTORY_PASSWORD" | docker login \
+              "${ARTIFACTORY_REGISTRY%%/*}" \
+              --username "$ARTIFACTORY_USERNAME" \
+              --password-stdin
+
+      - run:
+          name: Build and push images
+          no_output_timeout: 60m
+          command: |
+            set -euo pipefail
+
+            VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "$IMAGE_TAG")
+            SHORT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+
+            echo "Building images:"
+            echo "  REGISTRY:  $ARTIFACTORY_REGISTRY"
+            echo "  TAG:       $IMAGE_TAG"
+            echo "  VERSION:   $VERSION"
+            echo "  ARCHES:    $NICO_ARCHES"
+
+            make images \
+              IMAGE_REGISTRY="$ARTIFACTORY_REGISTRY" \
+              IMAGE_TAG="$IMAGE_TAG" \
+              VERSION="$VERSION" \
+              CI_COMMIT_SHORT_SHA="$SHORT_SHA" \
+              NICO_ARCHES="$NICO_ARCHES"
+
+      - run:
+          name: Re-tag nico as nvmetal-carbide
+          command: |
+            echo "Copying nico:$IMAGE_TAG -> nvmetal-carbide:$IMAGE_TAG"
+            docker buildx imagetools create \
+              -t "$ARTIFACTORY_REGISTRY/nvmetal-carbide:$IMAGE_TAG" \
+              "$ARTIFACTORY_REGISTRY/nico:$IMAGE_TAG"
+
+      - run:
+          name: Build summary
+          when: always
+          command: |
+            echo "============================================"
+            echo "Build completed at $(date)"
+            echo "Registry: $ARTIFACTORY_REGISTRY"
+            echo "Tag:      $IMAGE_TAG"
+            echo "Images:"
+            echo "  $ARTIFACTORY_REGISTRY/nico:$IMAGE_TAG"
+            echo "  $ARTIFACTORY_REGISTRY/nvmetal-carbide:$IMAGE_TAG"
+            echo "  $ARTIFACTORY_REGISTRY/nico-rest-*:$IMAGE_TAG"
+            echo "============================================"
+
+workflows:
+  build-images:
+    jobs:
+      - build-and-push-images:
+          <<: *my_context
+          filters:
+            branches:
+              only:
+                - main
+                - /^release\/.*/
+                - /^fix\/.*/
