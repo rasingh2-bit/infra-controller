@@ -98,7 +98,9 @@ LABEL org.opencontainers.image.title="machine-a-tron"
 LABEL org.opencontainers.image.description="NICo Hardware Simulation Tool"
 LABEL org.opencontainers.image.vendor="NVIDIA"
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
     ca-certificates \
     ipmitool \
     iproute2 \

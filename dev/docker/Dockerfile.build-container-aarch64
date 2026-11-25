@@ -95,6 +95,11 @@ RUN find /tmp/freeipmi-libs -maxdepth 1 -name '*.so.*' ! -type l \
 	sed -i '/^Package: \(libfreeipmi17\|freeipmi-common\|libipmimonitoring6\)$/,/^$/{s/^Version: .*/Version: 1.6.20-0local1/;s/^Source: freeipmi.*/Source: freeipmi (1.6.20-0local1)/;}' /var/lib/dpkg/status && \
 	ldconfig
 
+# Remove vulnerable transitive dependencies not needed for builds:
+# - libjson-xs-perl (CVE-2026-129113, CVE-2026-129114, CVE-2026-129115, CVE-2026-124539)
+RUN apt-get purge -y --auto-remove libjson-xs-perl 2>/dev/null; \
+	rm -rf /var/lib/apt/lists/*
+
 RUN test "$(dpkg-query -W -f='${Version}' kea-dev)" = "${KEA_VERSION}" && \
 	kea-dhcp6 -V
 

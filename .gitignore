@@ -72,3 +72,4 @@ dev/certs/pub/
 
 # DPU upgrade ISO/ZIP build output (build-dpu-upgrade-iso.sh default --output-dir)
 scripts/control-plane-dpu/upgrade/output/
+.circleci/infra-controller.code-workspace
