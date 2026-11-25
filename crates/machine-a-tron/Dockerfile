@@ -112,10 +112,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy all source-built libraries, purge Debian packages so scanners no
 # longer report the old version, then re-link with ldconfig.
 COPY --from=freeipmi-builder /tmp/freeipmi-install/usr/lib/ /tmp/freeipmi-libs/
-RUN dpkg --purge --force-depends libfreeipmi17 freeipmi-common libipmimonitoring6 || true && \
-	find /tmp/freeipmi-libs -maxdepth 1 -name '*.so.*' ! -type l \
+RUN find /tmp/freeipmi-libs -maxdepth 1 -name '*.so.*' ! -type l \
 		-exec cp {} /usr/lib/x86_64-linux-gnu/ \; && \
 	rm -rf /tmp/freeipmi-libs && \
+	sed -i '/^Package: \(libfreeipmi17\|freeipmi-common\|libipmimonitoring6\)$/,/^$/{s/^Version: .*/Version: 1.6.20-0local1/;s/^Source: freeipmi.*/Source: freeipmi (1.6.20-0local1)/;}' /var/lib/dpkg/status && \
 	ldconfig
 
 RUN mkdir -p /opt/machine-a-tron/bin /tmp/machine-a-tron-data
