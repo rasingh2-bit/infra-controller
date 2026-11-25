@@ -136,3 +136,7 @@ workflows:
                 - main
                 - /^release\/.*/
                 - /^fix\/.*/
+<<<<<<< HEAD
+                - /^coupang\/.*/
+=======
+>>>>>>> bb5deeda1f2489a69d6eca6a1f30245c35c8c21c
